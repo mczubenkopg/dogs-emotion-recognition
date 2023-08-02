@@ -1,2 +1,5 @@
-# dogs-emotion-recognition
-Project concerned about creating detector for dog's emotion based on different cryteria.
+# Project desription
+Project focused on creating model which is going to classify emotions from video.
+## First steps
+- [Onboarding document](https://github.com/DeepLabPG/docs/blob/main/onboarding/onboarding.md)
+

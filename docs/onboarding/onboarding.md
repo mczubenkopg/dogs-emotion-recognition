@@ -5,16 +5,7 @@
 - [Onboarding document](#onboarding-document)
   - [Table of contents](#table-of-contents)
 - [General description](#general-description)
-- [First steps - software setup](#first-steps---software-setup)
-  - [Cloning git repositories](#cloning-git-repositories)
-  - [Discord](#discord)
-  - [Jira](#jira)
-- [Techstack](#techstack)
-  - [Colab vs Jupyter](#jupyterlab-vs-google-colab)
-  - [Dash - webapp framework](#dash)
-  - [Amazon SageMaker](#amazon-sagemaker)
-  - [PyTorch model](#pytorch-model)
-  - [Explainable AI (XAI)](#explainable-ai)
+- [Explainable AI (XAI)](#explainable-ai)
 - [Research - deep learning](#research---deep-learning)
   - [Emotion Recognition in Images](#emotion-recognition-in-images)
   - [Explainable Model from FER paper](#explainable-model)
@@ -23,80 +14,11 @@
 # General description
 
 A project dedicated to the creation of an application that allows you to get emotional dog photos based on videos.
-
-The basic concept is a create simple desktop app which will allow user to test the model (probably neural networks) that we are going to provide.
-
+The basic concept is a create simple desktop app which will allow user to test the model that we are going to provide.
 The app will comprise of two modules - API and model.
 
-# First steps - software setup
-
-If you may have any questions, do not hesitate to ask anyone in our team or post
-them on the `help` channel on discord.
-
-These items is expected to be a checklist, make sure you have access to
-everything.
-
-## Cloning git repositories
-
-- create a workspace for all repos
-  - `mkdir deeplab`
-  - `cd deeplab`
-- clone the main repository
-  - `git clone https://github.com/DeepLabPG/deeplab.git`
-- initialise the submodules
-  - `git submodule update --init --recursive`
-
-## Discord
-
-- the main way of communication
-- you should've already received access to our channel
-
-## Jira
-
-- send your email to Michał Kopczyński
-- click the link you received in the email to create an account or log in to an
-  existing one
-
-## Techstack
-  
-### JupyterLab vs Google Colab
-  ***Feature comparison:***
- - Jupyter has worse portability than Colab, it usually runs on local hardware, but you can support Jupyter for multiple users through JupyterHub. This hub can run a remote server (gcp, aws, ...). Colab runs on Google server, and stores files in google drive, so it provides access to files anywhere.
- - JupyterLab uses RAM, CPU and storage, so it is recommended for high-end computers. Colab uses computing power from Google server, so it gives you access to more RAM and CPU (about 13GB Ram, 70GB disk storage, K80/Tesla T4 GPU 15GB).
- - Jupyter is preferred when working alone, and Colab for teamwork.
- - Jupyter can work for extended periods of time, while Colab works 12/24 hours and the process can be disrupted by Google.
- - Jupyter requires installation of most libraries, while Colab comes with pre-installed libraries.
- - Jupyter is more secure because you store the data on the hard drive, while colab is not required for very sensitive work.
- 
-  ***Summary***
-  Google Colab is more convenient for teamwork and more affordable to work with. It is less secure, but the specifics of our project do not require it. It gives access to computing power that we will not achieve using Jupyther. 
- In conclusion, Google Colab seems to be a better solution because of the project specifications and the organization of the team.
- 
- ### Dash
- Dash is the original low-code framework for rapidly building data apps in Python, R, Julia. It is written on top of plotly.js and react.js. It's particularly suited for anyone who works with data. Dash is mobile ready! The good thing is also that Dash is open-source project and can be used for commercial use without any payment.\
- There is exemplary product of Dash:
- ![Zrzut ekranu 2022-10-15 o 11 23 09](https://user-images.githubusercontent.com/77082422/195979160-7fe2f6f9-a756-4c40-8e13-abec0ea825af.png)
-Dash docs is well-written so following the docs will allow you to easily make simple app in 10 minutes. 
-There is a good tutorial how to deploy model to Dash webapp - https://towardsdatascience.com/deploy-machine-learning-model-using-dash-and-pipenv-c543569c33a6 \
-We will handle it later.
- 
- ### Amazon SageMaker
- Amazon SageMaker is a fully managed service that provides every developer and data scientist with the ability to build, train, and deploy ML models quickly. It is very powerful tool. For less than 1$ we can build, train and deploy our model but to be honest I do not know if we really need that. It is the topic to discuss
- 
- ### PyTorch model
- He is using in his model PIL library and pretrained PyTorch model to first of all clean the images. He is removing the photos where there are no dogs - typically data cleaning.\
- The next step is to load data as DataFrame using pandas (labeled data - that is the step that we have take care of).\
- Then, there is a step to create the model class - loading data, augmenting images.\
- The next step is to divide the dataset to test and train set - typically ML workflow.\
- Subsequently, creating DataLoaders (PyTorch feature) with given number of epochs and batch size (in our model we will pick it by ourselves).\
- The last step is to create Neural Network class (ConvNET architecture - conv layer (stride 2 at the beginning), max-pool layer, dense layer), choose the optimizer and loss function - after that, the training is started. \
- The accuracy is around 60% but I think that we can achieve more by improving the model approach. \
- At the very beginning to achieve some results we can base our work on that model. \
- This is also topic to discuss - maybe we have to think about the GANs...\
- Link to the interesting article: https://www.researchgate.net/publication/325808679_Emotion_Classification_with_Data_Augmentation_Using_Generative_Adversarial_Networks
- 
- ### Explainable AI 
- Explainable AI is not a technology per se, but the methodology of applying a model to the specific problem and understanding the decision process behind its actions. The key concept of XAI is "white-box", as opposed to the "black-box", meaning that every step of a deployed model should be understandable even by someone outside the world of AI and ML. Such transparency allows for continuous model evaluation, that could benefit teams other than the dev team. Easy to understand models are also easier to debug and scale. XAI algorithms should be constructed with 3 principles in mind; 1. Transparency 2.Interpretability and 3. Explainability. In our case, implementing XAI methodology would mean presenting the reasoning behind our model predictions in a clear and understandable way. 
+# Explainable AI 
+Explainable AI is not a technology per se, but the methodology of applying a model to the specific problem and understanding the decision process behind its actions. The key concept of XAI is "white-box", as opposed to the "black-box", meaning that every step of a deployed model should be understandable even by someone outside the world of AI and ML. Such transparency allows for continuous model evaluation, that could benefit teams other than the dev team. Easy to understand models are also easier to debug and scale. XAI algorithms should be constructed with 3 principles in mind; 1. Transparency 2.Interpretability and 3. Explainability. In our case, implementing XAI methodology would mean presenting the reasoning behind our model predictions in a clear and understandable way. 
 Further reading:
 https://www.ibm.com/watson/explainable-ai
 Interesting paper about presenting neural nets as decision trees, making them more explainable and even computationally superior:

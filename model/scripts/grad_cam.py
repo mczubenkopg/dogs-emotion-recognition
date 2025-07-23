@@ -5,6 +5,87 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
 
+def create_model():
+    base_model = tensorflow.applications.Xception(include_top=False,
+                                       weights='imagenet',
+                                       input_shape=(299, 299, 3),
+                                       pooling='avg')
+
+    # output of convolutional layers
+    x = base_model.output
+
+    # final Dense layer
+    outputs = layers.Dense(4, activation='softmax')(x)
+
+    # define model with base_model's input
+    model = models.Model(inputs=base_model.input, outputs=outputs)
+
+    # freeze weights of early layers
+    # to ease training
+    for layer in model.layers[:40]:
+        layer.trainable = False
+    loss = losses.categorical_crossentropy
+
+    # optimizer
+    optimizer = optimizers.RMSprop(lr=0.0001)
+
+    # metrics
+    metric = [metrics.categorical_accuracy]
+
+    # compile model with loss, optimizer, and evaluation metrics
+    model.compile(optimizer, loss, metric)
+    history = model.fit_generator(
+        train_generator,
+        steps_per_epoch=80,
+        epochs=10,
+        validation_data=validation_generator,
+        validation_steps=20)
+    # save model architecture
+    model_json = model.to_json()
+    open('xception_model.json', 'w').write(model_json)
+
+    # save model's learned weights
+    model.save_weights('image_classifier_xception.h5', overwrite=True)
+
+    return model
+
+def preprocess_image(x):
+    x /= 255.
+    x -= 0.5
+    x *= 2.
+
+    # 'RGB'->'BGR'
+    x = x[..., ::-1]
+    # Zero-center by mean pixel
+    x[..., 0] -= 103.939
+    x[..., 1] -= 116.779
+    x[..., 2] -= 123.68
+    return x
+
+
+def get_datasets():
+    train_datagen = preprocessing_image.ImageDataGenerator(
+        preprocessing_function=preprocess_image,
+        shear_range=0.2,
+        zoom_range=0.2,
+        horizontal_flip=True)
+
+    test_datagen = preprocessing_image.ImageDataGenerator(preprocessing_function=preprocess_image)
+    train_generator = train_datagen.flow_from_directory(
+        os.path.join(BASE_DIR, "imageNet_dataset/train"),
+        target_size=(299, 299),
+        batch_size=32,
+        class_mode='categorical',
+        shuffle=True)
+
+    validation_generator = test_datagen.flow_from_directory(
+        os.path.join(BASE_DIR, "imageNet_dataset/validation"),
+        target_size=(299, 299),
+        batch_size=32,
+        class_mode='categorical',
+        shuffle=True)
+    return train_generator, validation_generator
+
 def get_img_array(img_path, size):
     """Formatting img to numpy array"""
     img = keras.utils.load_img(img_path, target_size=size)

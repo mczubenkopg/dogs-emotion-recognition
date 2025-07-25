@@ -1,13 +1,14 @@
 import subprocess
 import time
 import warnings
+from collections import defaultdict
 from copy import deepcopy
 from pathlib import Path
 import torch
 from pytorch_grad_cam.metrics.road import ROADCombined
 from torchinfo import summary
 from torch import nn, optim
-from torch.utils.data import random_split, DataLoader
+from torch.utils.data import random_split, DataLoader, Subset
 from torchvision import transforms, models
 from torchvision.datasets import ImageFolder
 from torcheval.metrics import (MulticlassAccuracy, MulticlassF1Score, MulticlassPrecision, MulticlassRecall,
@@ -17,13 +18,15 @@ from torcheval.metrics import (MulticlassAccuracy, MulticlassF1Score, Multiclass
 # from torchmetrics.classification import Accuracy, F1Score, ConfusionMatrix, Precision, Recall, Specificity, ROC, AUROC
 from torch.utils.tensorboard import SummaryWriter
 from PIL import Image
-from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, EigenGradCAM, AblationCAM, RandomCAM
+from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, ScoreCAM, AblationCAM, XGradCAM, EigenCAM, EigenGradCAM, LayerCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget, ClassifierOutputSoftmaxTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image, deprocess_image, preprocess_image
 import numpy as np
 import cv2
 import gc
 import torch.hub
+import requests
+import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
@@ -37,6 +40,18 @@ SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 class_number = 5
+
+CAM_METHODS = {
+    "gradcam": GradCAM,
+    "gradcam++": GradCAMPlusPlus,
+    "scorecam": ScoreCAM,
+    "ablationcam": AblationCAM,
+    "xgradcam": XGradCAM,
+    "eigencam": EigenCAM,
+    "eigengradcam": EigenGradCAM,
+    "layercam": LayerCAM,
+    "fullgrad": FullGrad
+}
 
 
 def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
@@ -54,7 +69,7 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
     torcheval_metrics = dict(acc=MulticlassAccuracy(device=device), f1_score=MulticlassF1Score(device=device),
                              precision=MulticlassPrecision(device=device), recall=MulticlassRecall(device=device),
                              auroc=MulticlassAUROC(device=device, num_classes=class_number))
-                             # confusion_matrix=MulticlassConfusionMatrix(device=device, num_classes=class_number))
+    # confusion_matrix=MulticlassConfusionMatrix(device=device, num_classes=class_number))
     # torch_metrics = dict(
     #     acc_metric=Accuracy(task="multiclass", num_classes=class_number),
     #     f1_metric=F1Score(task="multiclass", num_classes=class_number),
@@ -204,7 +219,7 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
                 best_validation_epoch = epoch
                 n_epoch_worse = 0
                 best_weights = deepcopy(model.state_dict())
-                model_path = f'./weights/{model.name}_best_val.pth'
+                model_path = f'../weights/{model.name}_best_val.pth'
                 if not Path(model_path).parent.exists():
                     Path(model_path).parent.mkdir(exist_ok=True, parents=True)
                 torch.save(model.state_dict(), model_path)
@@ -224,15 +239,53 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
     return model
 
 
+def load_model(model_name):
+    model = models.get_model(model_name, weights="DEFAULT")
+    model = modify_model_output(model, train=False, num_classes=class_number)
+    model.name = model_name
+    model_path = Path(f'../weights/{model.name}_best_val.pth')
+    best_weights = torch.load(model_path)
+    model.load_state_dict(best_weights)
+    return model
+
+
+def train_model(model_name):
+    model = models.get_model(model_name, weights="DEFAULT")
+    model = modify_model_output(model, train=True, num_classes=class_number)
+    model.name = model_name
+    model = train(model, max_epochs=500, train_flag=True, verbose=True)
+    return model
+
+def get_balanced_subset(dataset, samples_per_class):
+    class_indices = defaultdict(list)
+    # Group indices by class
+    for idx, (_, label) in enumerate(dataset):
+        class_indices[label].append(idx)
+    # Sample fixed number per class
+    selected_indices = []
+    for label, indices in class_indices.items():
+        selected = indices[:samples_per_class]
+        selected_indices.extend(selected)
+    return Subset(dataset, selected_indices)
+
+
+
 def get_datasets(data_dir=Path('../dataset'), data_transforms=transforms.Compose([])):
     # Load your dataset
     data_transforms = transforms.Compose([
+        transforms.RandomResizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+        transforms.RandomRotation(degrees=15),
         transforms.Resize(256),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     image_datasets = ImageFolder(data_dir, transform=data_transforms)
+
+    # TODO balancing
+    # balanced_subset = get_balanced_subset(image_datasets, samples_per_class=1500)
 
     # Determine the sizes of the training and validation sets
     train_size = int(0.8 * len(image_datasets))
@@ -250,7 +303,8 @@ def get_datasets(data_dir=Path('../dataset'), data_transforms=transforms.Compose
     val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
     return train_loader, val_loader
 
-def get_eval(eval_dir=Path('./eval_data')):
+
+def get_eval(eval_dir=Path('../eval_data')):
     # Load your dataset
     data_transforms = transforms.Compose([
         transforms.Resize(256),
@@ -265,49 +319,87 @@ def get_eval(eval_dir=Path('./eval_data')):
     return eval_loader
 
 
-def grad_cams(model):
+def get_target_layer(model_name, model):
+    if model_name.startswith("resnet") or model_name.startswith("resnext") or "wide_resnet" in model_name:
+        return [model.layer4[-1]]
+    elif model_name.startswith("vgg") or model_name.startswith("alexnet"):
+        return [model.features[-1]]
+    elif model_name.startswith("mobilenet"):
+        return [model.features[-1]]
+    elif model_name.startswith("densenet"):
+        return [model.features[-1]]
+    elif model_name.startswith("shufflenet"):
+        return [model.conv5]
+    elif model_name.startswith("efficientnet"):
+        return [model.features[-1]]
+    elif model_name.startswith("vit") or model_name.startswith("swin"):
+        return [model.blocks[-1].norm1]  # ViT-compatible
+    else:
+        raise ValueError(f"Unsupported model: {model_name}")
+
+
+def load_image(image_path):
+    transform = transforms.Compose([
+        transforms.Resize(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+    image = Image.open(image_path).convert("RGB").resize((224, 224))
+    input_tensor = transform(image).unsqueeze(0)
+    rgb_image = np.array(image).astype(np.float32) / 255.0
+    return input_tensor, rgb_image
+
+
+def grad_cams(model, eval_path=Path('../eval_data')):
     model.eval()
     eval_dataset = get_eval()
+    to_pil = transforms.ToPILImage()
+    unnormalize = transforms.Normalize(
+        mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
+        std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
+    )
     for org_input, org_target in eval_dataset:
-        img = org_input.to_numpy()
+        rgb_image =  np.array(to_pil(torch.clamp(unnormalize(org_input[0]), 0, 1))).astype(np.float32)/255.
         targets = [ClassifierOutputTarget(org_target)]
-        target_layers = [model.layer4]
-        with GradCAM(model=model, target_layers=target_layers) as cam:
-            grayscale_cams = cam(input_tensor=org_input, targets=targets)
-            cam_image = show_cam_on_image(img, grayscale_cams[0, :], use_rgb=True)
-        cam = np.uint8(255*grayscale_cams[0, :])
-        cam = cv2.merge([cam, cam, cam])
-        images = np.hstack((np.uint8(255*img), cam , cam_image))
-        Image.fromarray(images)
+        target_layers = get_target_layer(model.name, model)
+        for i, (cam_name, cam) in enumerate(CAM_METHODS.items()):
+            cam = cam(model=model, target_layers=target_layers)
+            grayscale_cam = cam(input_tensor=org_input, targets=targets)[0]
+            cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
+            images = np.hstack((np.uint8(255 * rgb_image), cam_image))
+            result = Image.fromarray(images)
+            result.save(Path.joinpath(eval_path, Path(f'{np.uint8(org_target)}_{i}_{model.name}_{cam_name}.jpg')))
 
-    # image_url = "https://th.bing.com/th/id/R.94b33a074b9ceeb27b1c7fba0f66db74?rik=wN27mvigyFlXGg&riu=http%3a%2f%2fimages5.fanpop.com%2fimage%2fphotos%2f31400000%2fBear-Wallpaper-bears-31446777-1600-1200.jpg&ehk=oD0JPpRVTZZ6yizZtGQtnsBGK2pAap2xv3sU3A4bIMc%3d&risl=&pid=ImgRaw&r=0"
-# img = np.array(Image.open(requests.get(image_url, stream=True).raw))
-# img = cv2.resize(img, (224, 224))
-# img = np.float32(img) / 255
-# input_tensor = preprocess_image(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-#
-# # The target for the CAM is the Bear category.
-# # As usual for classication, the target is the logit output before softmax, for that category.
-# targets = [ClassifierOutputTarget(295)]
-# target_layers = [model.layer4]
-# with GradCAM(model=model, target_layers=target_layers) as cam:
-#     grayscale_cams = cam(input_tensor=input_tensor, targets=targets)
-#     cam_image = show_cam_on_image(img, grayscale_cams[0, :], use_rgb=True)
-# cam = np.uint8(255*grayscale_cams[0, :])
-# cam = cv2.merge([cam, cam, cam])
-# images = np.hstack((np.uint8(255*img), cam , cam_image))
-# Image.fromarray(images)
+def generate_gradcam(model, image_path, num_classes=5, class_index=None):
+    """
+    Based on model but from pure image
+    """
+    model.eval()
+    input_tensor, rgb_image = load_image(image_path)
+    target_layers = get_target_layer(model.name, model)
+    for cam_name, cam in CAM_METHODS:
+        cam = cam(model=model, target_layers=target_layers)
+        targets = [ClassifierOutputTarget(class_index)] if class_index is not None else None
+        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0]
+        cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
+        images = np.hstack((np.uint8(255 * rgb_image), cam, cam_image))
+        result = Image.fromarray(images)
+        result.save(Path.joinpath(image_path.parent,
+                                  image_path.name.replace('.', f'_{model.name}_{cam_name}.')))
 
 def run_tensorboard():
     subprocess.run(["tensorboard", "--logdir=../runs"])
 
 
-def modify_model_output(model, num_classes=5):
+def modify_model_output(model, train=True, num_classes=5):
     """
     Replace the final classification layer with a Linear + Softmax
     """
-    for param in model.parameters():
-        param.requires_grad = False
+    if train:
+        for param in model.parameters():
+            param.requires_grad = False
     # ResNet or others with .fc
     if hasattr(model, 'fc'):
         model.fc = nn.Linear(model.fc.in_features, num_classes)
@@ -335,46 +427,55 @@ def modify_model_output(model, num_classes=5):
         raise ValueError("Unknown model architecture – customize this function for your case.")
     return model
 
+def gradcams_from_files():
+    models_list = ['resnet50']
+    eval_path = Path('../eval_data')
+    class_numbers = {'angry': 0, 'curious': 1, 'happy': 2, 'sad': 3, 'sleepy': 4}
+    for m in models_list:
+        model = load_model(m)
+        for image_path in eval_path.rglob('*.jpg'):
+            generate_gradcam(model, image_path, class_index=class_numbers[image_path.parent.name])
+
 
 # Showing the metrics on top of the CAM :
-def visualize_score(visualization, score, name, percentiles):
-    visualization = cv2.putText(visualization, name, (10, 20),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-    visualization = cv2.putText(visualization, "(Least first - Most first)/2", (10, 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1, cv2.LINE_AA)
-    visualization = cv2.putText(visualization, f"Percentiles: {percentiles}", (10, 55),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-    visualization = cv2.putText(visualization, "Remove and Debias", (10, 70),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-    visualization = cv2.putText(visualization, f"{score:.5f}", (10, 85),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-    return visualization
-
-
-def benchmark(input_tensor, target_layers, eigen_smooth=False, aug_smooth=False, category=281):
-    methods = [("GradCAM", GradCAM(model=model, target_layers=target_layers, use_cuda=True)),
-               ("GradCAM++", GradCAMPlusPlus(model=model, target_layers=target_layers, use_cuda=True)),
-               ("EigenGradCAM", EigenGradCAM(model=model, target_layers=target_layers, use_cuda=True)),
-               ("AblationCAM", AblationCAM(model=model, target_layers=target_layers, use_cuda=True)),
-               ("RandomCAM", RandomCAM(model=model, target_layers=target_layers, use_cuda=True))]
-
-    cam_metric = ROADCombined(percentiles=[20, 40, 60, 80])
-    targets = [ClassifierOutputTarget(category)]
-    metric_targets = [ClassifierOutputSoftmaxTarget(category)]
-
-    visualizations = []
-    percentiles = [10, 50, 90]
-    for name, cam_method in methods:
-        with cam_method:
-            attributions = cam_method(input_tensor=input_tensor,
-                                      targets=targets, eigen_smooth=eigen_smooth, aug_smooth=aug_smooth)
-        attribution = attributions[0, :]
-        scores = cam_metric(input_tensor, attributions, metric_targets, model)
-        score = scores[0]
-        visualization = show_cam_on_image(cat_and_dog, attribution, use_rgb=True)
-        visualization = visualize_score(visualization, score, name, percentiles)
-        visualizations.append(visualization)
-    return Image.fromarray(np.hstack(visualizations))
+# def visualize_score(visualization, score, name, percentiles):
+#     visualization = cv2.putText(visualization, name, (10, 20),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+#     visualization = cv2.putText(visualization, "(Least first - Most first)/2", (10, 40),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 255, 255), 1, cv2.LINE_AA)
+#     visualization = cv2.putText(visualization, f"Percentiles: {percentiles}", (10, 55),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+#     visualization = cv2.putText(visualization, "Remove and Debias", (10, 70),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+#     visualization = cv2.putText(visualization, f"{score:.5f}", (10, 85),
+#                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+#     return visualization
+#
+#
+# def benchmark(input_tensor, target_layers, eigen_smooth=False, aug_smooth=False, category=281):
+#     methods = [("GradCAM", GradCAM(model=model, target_layers=target_layers, use_cuda=True)),
+#                ("GradCAM++", GradCAMPlusPlus(model=model, target_layers=target_layers, use_cuda=True)),
+#                ("EigenGradCAM", EigenGradCAM(model=model, target_layers=target_layers, use_cuda=True)),
+#                ("AblationCAM", AblationCAM(model=model, target_layers=target_layers, use_cuda=True)),
+#                ("RandomCAM", RandomCAM(model=model, target_layers=target_layers, use_cuda=True))]
+#
+#     cam_metric = ROADCombined(percentiles=[20, 40, 60, 80])
+#     targets = [ClassifierOutputTarget(category)]
+#     metric_targets = [ClassifierOutputSoftmaxTarget(category)]
+#
+#     visualizations = []
+#     percentiles = [10, 50, 90]
+#     for name, cam_method in methods:
+#         with cam_method:
+#             attributions = cam_method(input_tensor=input_tensor,
+#                                       targets=targets, eigen_smooth=eigen_smooth, aug_smooth=aug_smooth)
+#         attribution = attributions[0, :]
+#         scores = cam_metric(input_tensor, attributions, metric_targets, model)
+#         score = scores[0]
+#         visualization = show_cam_on_image(cat_and_dog, attribution, use_rgb=True)
+#         visualization = visualize_score(visualization, score, name, percentiles)
+#         visualizations.append(visualization)
+#     return Image.fromarray(np.hstack(visualizations))
 
 
 # cat_and_dog_image_url = "https://raw.githubusercontent.com/jacobgil/pytorch-grad-cam/master/examples/both.png"
@@ -390,11 +491,11 @@ def benchmark(input_tensor, target_layers, eigen_smooth=False, aug_smooth=False,
 
 if __name__ == '__main__':
     models_list = ['resnet50']
+    # models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+    #                "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+    #                "vit_b_16", "swin_t"]
     # models_list = models.list_models(module=models)
     for m in models_list:
-        model = models.get_model(m, weights="DEFAULT")
-        model = modify_model_output(model, num_classes=class_number)
-        model.name = m
-        print(model)
-        model = train(model, max_epochs=500, train_flag=True, verbose=True)
+        model = load_model(m)
         grad_cams(model)

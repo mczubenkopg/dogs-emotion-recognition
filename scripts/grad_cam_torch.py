@@ -94,6 +94,7 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
     # Init variables
     best_weights = {}
     best_validation_loss = 1000
+    best_validation_epoch = 0
     n_epoch_worse = 0
 
     # Epoch loop
@@ -232,6 +233,8 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
                 break
     if best_weights:
         model.load_state_dict(best_weights)
+        model_path = f'../weights/{model.name}_e{best_validation_epoch}_v{best_validation_loss}.pth'
+        torch.save(model.state_dict(), model_path)
     if verbose:
         time_elapsed = time.time() - time_stamp
         print(f'Training complete in {time_elapsed // 60:.6f}m {time_elapsed % 60:.6f}s')
@@ -358,6 +361,7 @@ def load_image(image_path):
 
 def grad_cams(model, eval_path=Path('../eval_data')):
     model.eval()
+    model_path = eval_path.mkdir(f'./{model.name}')
     eval_dataset = get_eval()
     to_pil = transforms.ToPILImage()
     unnormalize = transforms.Normalize(
@@ -373,8 +377,12 @@ def grad_cams(model, eval_path=Path('../eval_data')):
             grayscale_cam = cam(input_tensor=org_input, targets=targets)[0]
             cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
             images = np.hstack((np.uint8(255 * rgb_image), cam_image))
-            result = Image.fromarray(images)
-            result.save(Path.joinpath(eval_path, Path(f'{np.uint8(org_target)}_{i}_{model.name}_{cam_name}.jpg')))
+            image = Image.fromarray(np.uint8(255 * rgb_image))
+            images = Image.fromarray(images)
+            cam_image = Image.fromarray(cam_image)
+            image.save(Path.joinpath(model_path, Path(f'org_{i}_{cam_name}.jpg')))
+            images.save(Path.joinpath(model_path, Path(f'join_{i}_{cam_name}.jpg')))
+            cam_image.save(Path.joinpath(model_path, Path(f'cam_{i}_{cam_name}.jpg')))
 
 
 def generate_gradcam(model, image_path, num_classes=5, class_index=None):

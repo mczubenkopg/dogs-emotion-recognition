@@ -361,7 +361,9 @@ def load_image(image_path):
 
 def grad_cams(model, eval_path=Path('../eval_data')):
     model.eval()
-    model_path = eval_path.mkdir(f'./{model.name}')
+    model_path = Path.joinpath(eval_path.parent, f'./results/{model.name}')
+    if not model_path.exists():
+        model_path.mkdir()
     eval_dataset = get_eval()
     to_pil = transforms.ToPILImage()
     unnormalize = transforms.Normalize(
@@ -495,11 +497,11 @@ def gradcams_from_files():
 
 
 if __name__ == '__main__':
-    # models_list = ['resnet50']
-    models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-                   "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
-                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-                   "vit_b_16", "swin_t"]
+    models_list = ['resnet50']
+    # models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+    #                "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+    #                "vit_b_16", "swin_t"]
     # All torchvision - to run
     # models_list = models.list_models(module=models)
     for m in models_list:

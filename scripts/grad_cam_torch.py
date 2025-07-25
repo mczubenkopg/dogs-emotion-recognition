@@ -53,6 +53,8 @@ CAM_METHODS = {
     "layercam": LayerCAM,
     "fullgrad": FullGrad
 }
+class_numbers = {'angry': 0, 'curious': 1, 'happy': 2, 'sad': 3, 'sleepy': 4}
+numbers_class = {n:k for k, n in class_numbers.items()}
 
 
 def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
@@ -235,6 +237,7 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
         model.load_state_dict(best_weights)
         model_path = f'../weights/{model.name}_e{best_validation_epoch}_v{best_validation_loss}.pth'
         torch.save(model.state_dict(), model_path)
+        print(f'Best validation score {best_validation_loss} in {best_validation_epoch} epoch')
     if verbose:
         time_elapsed = time.time() - time_stamp
         print(f'Training complete in {time_elapsed // 60:.6f}m {time_elapsed % 60:.6f}s')
@@ -361,7 +364,10 @@ def load_image(image_path):
 
 def grad_cams(model, eval_path=Path('../eval_data')):
     model.eval()
-    model_path = Path.joinpath(eval_path.parent, f'./results/{model.name}')
+    model_path = Path.joinpath(eval_path.parent, f'../results')
+    if not model_path.exists():
+        model_path.mkdir()
+    model_path = Path.joinpath(model_path, f'./{model.name}')
     if not model_path.exists():
         model_path.mkdir()
     eval_dataset = get_eval()
@@ -371,20 +377,24 @@ def grad_cams(model, eval_path=Path('../eval_data')):
         std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
     )
     for i, (org_input, org_target) in enumerate(eval_dataset):
+        c = numbers_class[int(org_target)]
         rgb_image = np.array(to_pil(torch.clamp(unnormalize(org_input[0]), 0, 1))).astype(np.float32) / 255.
         targets = [ClassifierOutputTarget(org_target)]
         target_layers = get_target_layer(model.name, model)
         for cam_name, cam in CAM_METHODS.items():
+            cam_path = Path.joinpath(model_path, f'./{cam_name}')
+            if not cam_path.exists():
+                cam_path.mkdir()
             cam = cam(model=model, target_layers=target_layers)
             grayscale_cam = cam(input_tensor=org_input, targets=targets)[0]
             cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
             images = np.hstack((np.uint8(255 * rgb_image), cam_image))
             images = Image.fromarray(images)
             cam_image = Image.fromarray(cam_image)
-            images.save(Path.joinpath(model_path, Path(f'join_{i}_{int(org_target)}_{cam_name}.jpg')))
-            cam_image.save(Path.joinpath(model_path, Path(f'cam_{i}_{int(org_target)}_{cam_name}.jpg')))
+            images.save(Path.joinpath(cam_path, Path(f'join_{i}_{c}_{cam_name}.jpg')))
+            cam_image.save(Path.joinpath(cam_path, Path(f'cam_{i}_{c}_{cam_name}.jpg')))
         image = Image.fromarray(np.uint8(255 * rgb_image))
-        image.save(Path.joinpath(model_path, Path(f'org_{i}_{int(org_target)}_{cam_name}.jpg')))
+        image.save(Path.joinpath(model_path, Path(f'org_{i}_{c}.jpg')))
 
 
 
@@ -496,16 +506,25 @@ def gradcams_from_files():
 #         visualizations.append(visualization)
 #     return Image.fromarray(np.hstack(visualizations))
 
+def train_grad_all():
+    models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+                   "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+                   "vit_b_16", "swin_t"]
+    # All torchvision - to run
+    # models_list = models.list_models(module=models)
+    for m in models_list:
+        # model = load_model(m)
+        model = train_model(m)
+        if model:
+            grad_cams(model)
+
 
 if __name__ == '__main__':
     models_list = ['resnet50']
-    # models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-    #                "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
-    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-    #                "vit_b_16", "swin_t"]
-    # All torchvision - to run
-    # models_list = models.list_models(module=models)
     for m in models_list:
         model = load_model(m)
         if model:
             grad_cams(model)
+
+    # train_grad_all()

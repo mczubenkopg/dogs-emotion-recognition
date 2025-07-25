@@ -18,7 +18,8 @@ from torcheval.metrics import (MulticlassAccuracy, MulticlassF1Score, Multiclass
 # from torchmetrics.classification import Accuracy, F1Score, ConfusionMatrix, Precision, Recall, Specificity, ROC, AUROC
 from torch.utils.tensorboard import SummaryWriter
 from PIL import Image
-from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, ScoreCAM, AblationCAM, XGradCAM, EigenCAM, EigenGradCAM, LayerCAM, FullGrad
+from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, ScoreCAM, AblationCAM, XGradCAM, EigenCAM, EigenGradCAM, \
+    LayerCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget, ClassifierOutputSoftmaxTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image, deprocess_image, preprocess_image
 import numpy as np
@@ -244,9 +245,12 @@ def load_model(model_name):
     model = modify_model_output(model, train=False, num_classes=class_number)
     model.name = model_name
     model_path = Path(f'../weights/{model.name}_best_val.pth')
-    best_weights = torch.load(model_path)
-    model.load_state_dict(best_weights)
-    return model
+    if model_path.exists():
+        best_weights = torch.load(model_path)
+        model.load_state_dict(best_weights)
+        return model
+    else:
+        return None
 
 
 def train_model(model_name):
@@ -255,6 +259,7 @@ def train_model(model_name):
     model.name = model_name
     model = train(model, max_epochs=500, train_flag=True, verbose=True)
     return model
+
 
 def get_balanced_subset(dataset, samples_per_class):
     class_indices = defaultdict(list)
@@ -267,7 +272,6 @@ def get_balanced_subset(dataset, samples_per_class):
         selected = indices[:samples_per_class]
         selected_indices.extend(selected)
     return Subset(dataset, selected_indices)
-
 
 
 def get_datasets(data_dir=Path('../dataset'), data_transforms=transforms.Compose([])):
@@ -361,7 +365,7 @@ def grad_cams(model, eval_path=Path('../eval_data')):
         std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
     )
     for org_input, org_target in eval_dataset:
-        rgb_image =  np.array(to_pil(torch.clamp(unnormalize(org_input[0]), 0, 1))).astype(np.float32)/255.
+        rgb_image = np.array(to_pil(torch.clamp(unnormalize(org_input[0]), 0, 1))).astype(np.float32) / 255.
         targets = [ClassifierOutputTarget(org_target)]
         target_layers = get_target_layer(model.name, model)
         for i, (cam_name, cam) in enumerate(CAM_METHODS.items()):
@@ -371,6 +375,7 @@ def grad_cams(model, eval_path=Path('../eval_data')):
             images = np.hstack((np.uint8(255 * rgb_image), cam_image))
             result = Image.fromarray(images)
             result.save(Path.joinpath(eval_path, Path(f'{np.uint8(org_target)}_{i}_{model.name}_{cam_name}.jpg')))
+
 
 def generate_gradcam(model, image_path, num_classes=5, class_index=None):
     """
@@ -388,6 +393,7 @@ def generate_gradcam(model, image_path, num_classes=5, class_index=None):
         result = Image.fromarray(images)
         result.save(Path.joinpath(image_path.parent,
                                   image_path.name.replace('.', f'_{model.name}_{cam_name}.')))
+
 
 def run_tensorboard():
     subprocess.run(["tensorboard", "--logdir=../runs"])
@@ -427,6 +433,7 @@ def modify_model_output(model, train=True, num_classes=5):
         raise ValueError("Unknown model architecture – customize this function for your case.")
     return model
 
+
 def gradcams_from_files():
     models_list = ['resnet50']
     eval_path = Path('../eval_data')
@@ -438,6 +445,7 @@ def gradcams_from_files():
 
 
 # Showing the metrics on top of the CAM :
+# TODO CAM metrics
 # def visualize_score(visualization, score, name, percentiles):
 #     visualization = cv2.putText(visualization, name, (10, 20),
 #                                 cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
@@ -478,24 +486,15 @@ def gradcams_from_files():
 #     return Image.fromarray(np.hstack(visualizations))
 
 
-# cat_and_dog_image_url = "https://raw.githubusercontent.com/jacobgil/pytorch-grad-cam/master/examples/both.png"
-# cat_and_dog = np.array(Image.open(requests.get(cat_and_dog_image_url, stream=True).raw))
-# cat_and_dog = np.float32(cat_and_dog) / 255
-# input_tensor = preprocess_image(cat_and_dog, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-# target_layers = [model.layer4]
-#
-# model.cuda()
-# input_tensor = input_tensor.cuda()
-# np.random.seed(42)
-# benchmark(input_tensor, target_layers, eigen_smooth=False, aug_smooth=False)
-
 if __name__ == '__main__':
-    models_list = ['resnet50']
-    # models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-    #                "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
-    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-    #                "vit_b_16", "swin_t"]
+    # models_list = ['resnet50']
+    models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+                   "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+                   "vit_b_16", "swin_t"]
+    # All torchvision - to run
     # models_list = models.list_models(module=models)
     for m in models_list:
         model = load_model(m)
-        grad_cams(model)
+        if model:
+            grad_cams(model)

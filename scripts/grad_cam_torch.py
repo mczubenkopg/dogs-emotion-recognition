@@ -370,21 +370,22 @@ def grad_cams(model, eval_path=Path('../eval_data')):
         mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
         std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
     )
-    for org_input, org_target in eval_dataset:
+    for i, (org_input, org_target) in enumerate(eval_dataset):
         rgb_image = np.array(to_pil(torch.clamp(unnormalize(org_input[0]), 0, 1))).astype(np.float32) / 255.
         targets = [ClassifierOutputTarget(org_target)]
         target_layers = get_target_layer(model.name, model)
-        for i, (cam_name, cam) in enumerate(CAM_METHODS.items()):
+        for cam_name, cam in CAM_METHODS.items():
             cam = cam(model=model, target_layers=target_layers)
             grayscale_cam = cam(input_tensor=org_input, targets=targets)[0]
             cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
             images = np.hstack((np.uint8(255 * rgb_image), cam_image))
-            image = Image.fromarray(np.uint8(255 * rgb_image))
             images = Image.fromarray(images)
             cam_image = Image.fromarray(cam_image)
-            image.save(Path.joinpath(model_path, Path(f'org_{i}_{cam_name}.jpg')))
-            images.save(Path.joinpath(model_path, Path(f'join_{i}_{cam_name}.jpg')))
-            cam_image.save(Path.joinpath(model_path, Path(f'cam_{i}_{cam_name}.jpg')))
+            images.save(Path.joinpath(model_path, Path(f'join_{i}_{int(org_target)}_{cam_name}.jpg')))
+            cam_image.save(Path.joinpath(model_path, Path(f'cam_{i}_{int(org_target)}_{cam_name}.jpg')))
+        image = Image.fromarray(np.uint8(255 * rgb_image))
+        image.save(Path.joinpath(model_path, Path(f'org_{i}_{int(org_target)}_{cam_name}.jpg')))
+
 
 
 def generate_gradcam(model, image_path, num_classes=5, class_index=None):

@@ -1,0 +1,3 @@
+[submodule "retinaface-pytorch"]
+	path = retinaface-pytorch
+	url = https://github.com/yakhyo/retinaface-pytorch.git

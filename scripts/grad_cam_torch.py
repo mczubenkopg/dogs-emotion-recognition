@@ -363,6 +363,8 @@ def load_image(image_path):
 
 
 def grad_cams(model, eval_path=Path('../eval_data')):
+    for param in model.parameters():
+        param.requires_grad = True
     model.eval()
     model_path = Path.joinpath(eval_path.parent, f'../results')
     if not model_path.exists():
@@ -520,11 +522,13 @@ def train_grad_all():
             grad_cams(model)
 
 
-if __name__ == '__main__':
-    models_list = ['resnet50']
+def calc_gradcams(models_list):
     for m in models_list:
         model = load_model(m)
         if model:
             grad_cams(model)
 
-    # train_grad_all()
+
+if __name__ == '__main__':
+    # models_list = ['resnet50']
+    train_grad_all()

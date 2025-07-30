@@ -1,7 +1,7 @@
 import subprocess
 import time
 import warnings
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from copy import deepcopy
 from pathlib import Path
 import torch
@@ -22,6 +22,7 @@ from pytorch_grad_cam import GradCAM, GradCAMPlusPlus, ScoreCAM, AblationCAM, XG
     LayerCAM, FullGrad
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget, ClassifierOutputSoftmaxTarget
 from pytorch_grad_cam.utils.image import show_cam_on_image, deprocess_image, preprocess_image
+from pytorch_grad_cam.ablation_layer import AblationLayerVit
 import numpy as np
 import cv2
 import gc
@@ -41,6 +42,7 @@ SEED = 42
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 class_number = 5
+ModelHub = namedtuple('ModelHub', ['repo', 'name'])
 
 CAM_METHODS = {
     "gradcam": GradCAM,
@@ -247,7 +249,10 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
 
 
 def load_model(model_name):
-    model = models.get_model(model_name, weights="DEFAULT")
+    if isinstance(model_name, str):
+        model = models.get_model(model_name, weights="DEFAULT")
+    elif isinstance(model_name, ModelHub):
+        model = torch.hub.load(model_name.repo, model_name.name, pretrained=True)
     model = modify_model_output(model, train=False, num_classes=class_number)
     model.name = model_name
     model_path = Path(f'../weights/{model.name}_best_val.pth')
@@ -260,7 +265,10 @@ def load_model(model_name):
 
 
 def train_model(model_name):
-    model = models.get_model(model_name, weights="DEFAULT")
+    if isinstance(model_name, str):
+        model = models.get_model(model_name, weights="DEFAULT")
+    elif isinstance(model_name, ModelHub):
+        model = torch.hub.load(model_name.repo, model_name.name, pretrained=True)
     model = modify_model_output(model, train=True, num_classes=class_number)
     model.name = model_name
     model = train(model, max_epochs=500, train_flag=True, verbose=True)
@@ -342,10 +350,23 @@ def get_target_layer(model_name, model):
         return [model.conv5]
     elif model_name.startswith("efficientnet"):
         return [model.features[-1]]
-    elif model_name.startswith("vit") or model_name.startswith("swin"):
-        return [model.blocks[-1].norm1]  # ViT-compatible
+    elif model_name.startswith("vit"):
+        return [model.encoder.ln]
+    elif model_name.startswith("deit"):
+        return [model.blocks[-1].norm1]
+    elif model_name.startswith("swin"):
+        return [model.layers[-1].blocks[-1].norm2]
     else:
         raise ValueError(f"Unsupported model: {model_name}")
+
+def reshape_transform(tensor, height=14, width=14):
+    result = tensor[:, 1:, :].reshape(tensor.size(0),
+                                      height, width, tensor.size(2))
+
+    # Bring the channels to the first dimension,
+    # like in CNNs.
+    result = result.transpose(2, 3).transpose(1, 2)
+    return result
 
 
 def load_image(image_path):
@@ -366,7 +387,7 @@ def grad_cams(model, eval_path=Path('../eval_data')):
     for param in model.parameters():
         param.requires_grad = True
     model.eval()
-    model_path = Path.joinpath(eval_path.parent, f'../results')
+    model_path = Path.joinpath(eval_path.parent, f'./results')
     if not model_path.exists():
         model_path.mkdir()
     model_path = Path.joinpath(model_path, f'./{model.name}')
@@ -387,7 +408,15 @@ def grad_cams(model, eval_path=Path('../eval_data')):
             cam_path = Path.joinpath(model_path, f'./{cam_name}')
             if not cam_path.exists():
                 cam_path.mkdir()
-            cam = cam(model=model, target_layers=target_layers)
+            if model.name.startswith("vit") or model.name.startswith("swin") or model.name.startwith("deit"):
+                if cam_name == "ablationcam":
+                    cam = cam(model=model, target_layers=target_layers, reshape_transform=reshape_transform, ablation_layer=AblationLayerVit())
+                elif cam_name == "fullgradcamm":
+                    continue
+                else:
+                    cam = cam(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
+            else:
+                cam = cam(model=model, target_layers=target_layers)
             grayscale_cam = cam(input_tensor=org_input, targets=targets)[0]
             cam_image = show_cam_on_image(rgb_image, grayscale_cam, use_rgb=True)
             images = np.hstack((np.uint8(255 * rgb_image), cam_image))
@@ -512,7 +541,7 @@ def train_grad_all():
     models_list = ["resnet18", "resnet50", "resnext50_32x4d",
                    "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
                    "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-                   "vit_b_16", "swin_t"]
+                   "vit_b_16", "swin_t", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
     # All torchvision - to run
     # models_list = models.list_models(module=models)
     for m in models_list:
@@ -522,6 +551,15 @@ def train_grad_all():
             grad_cams(model)
 
 
+def train_grad_models(models_list):
+    # All torchvision - to run
+    # models_list = models.list_models(module=models)
+    for m in models_list:
+        # model = load_model(m)
+        model = train_model(m)
+        if model:
+            grad_cams(model)
+
 def calc_gradcams(models_list):
     for m in models_list:
         model = load_model(m)
@@ -530,5 +568,6 @@ def calc_gradcams(models_list):
 
 
 if __name__ == '__main__':
-    # models_list = ['resnet50']
-    train_grad_all()
+    models_list = ['vit_b_16']
+    calc_gradcams(models_list)
+    # train_grad_all()

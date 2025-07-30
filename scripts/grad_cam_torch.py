@@ -552,8 +552,9 @@ def train_grad_all():
 
 
 def train_grad_models(models_list):
-    # All torchvision - to run
-    # models_list = models.list_models(module=models)
+    """
+    Train models and calculate all gradcams
+    """
     for m in models_list:
         # model = load_model(m)
         model = train_model(m)
@@ -561,6 +562,9 @@ def train_grad_models(models_list):
             grad_cams(model)
 
 def calc_gradcams(models_list):
+    """
+    Load trained models (in folder ./weights/model_best_val.pth) and calculates all gradcams
+    """
     for m in models_list:
         model = load_model(m)
         if model:
@@ -568,6 +572,11 @@ def calc_gradcams(models_list):
 
 
 if __name__ == '__main__':
-    models_list = ['vit_b_16']
-    calc_gradcams(models_list)
+    # models_list = models.list_models(module=models) - TODO
+    all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+                   "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+                   "vit_b_16", "swin_t", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
+    models_list = all_models_list[-3:]
+    train_grad_models(models_list)
     # train_grad_all()

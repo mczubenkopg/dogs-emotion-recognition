@@ -106,7 +106,7 @@ def train(model, max_epochs, train_flag=True, verbose=False, callback_break=20):
         gc.collect()
         if verbose:
             print(80 * '-')
-            print(f'Epoch: {epoch}.')
+            print(f'Epoch: {epoch} model {model.name}.')
 
         # Training procedure
         if train_flag:
@@ -411,7 +411,7 @@ def grad_cams(model, eval_path=Path('../eval_data')):
             if model.name.startswith("vit") or model.name.startswith("swin") or model.name.startwith("deit"):
                 if cam_name == "ablationcam":
                     cam = cam(model=model, target_layers=target_layers, reshape_transform=reshape_transform, ablation_layer=AblationLayerVit())
-                elif cam_name == "fullgradcamm":
+                elif cam_name == "fullgrad":
                     continue
                 else:
                     cam = cam(model=model, target_layers=target_layers, reshape_transform=reshape_transform)
@@ -480,6 +480,10 @@ def modify_model_output(model, train=True, num_classes=5):
     elif hasattr(model, 'heads'):
         model.heads.head = nn.Linear(model.heads.head.in_features, num_classes)
         for param in model.heads.head.parameters():
+            param.requires_grad = True
+    elif hasattr(model, 'head'):
+        model.head = nn.Linear(model.head.in_features, num_classes)
+        for param in model.head.parameters():
             param.requires_grad = True
     else:
         raise ValueError("Unknown model architecture – customize this function for your case.")
@@ -574,9 +578,9 @@ def calc_gradcams(models_list):
 if __name__ == '__main__':
     # models_list = models.list_models(module=models) - TODO
     all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-                   "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+               "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
                    "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
                    "vit_b_16", "swin_t", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
-    models_list = all_models_list[-3:]
+    models_list = all_models_list[-1:]
     train_grad_models(models_list)
     # train_grad_all()

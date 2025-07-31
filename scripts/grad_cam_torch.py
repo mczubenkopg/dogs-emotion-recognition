@@ -354,8 +354,10 @@ def get_target_layer(model_name, model):
         return [model.encoder.ln]
     elif model_name.startswith("deit"):
         return [model.blocks[-1].norm1]
-    elif model_name.startswith("swin"):
+    elif model_name.startswith("swin_base"):
         return [model.layers[-1].blocks[-1].norm2]
+    elif model_name.startswith("swin_t"):
+        return [model.features[-1][-1].norm2]
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
@@ -408,7 +410,7 @@ def grad_cams(model, eval_path=Path('../eval_data')):
             cam_path = Path.joinpath(model_path, f'./{cam_name}')
             if not cam_path.exists():
                 cam_path.mkdir()
-            if model.name.startswith("vit") or model.name.startswith("swin") or model.name.startwith("deit"):
+            if model.name.startswith("vit") or model.name.startswith("deit"):
                 if cam_name == "ablationcam":
                     cam = cam(model=model, target_layers=target_layers, reshape_transform=reshape_transform, ablation_layer=AblationLayerVit())
                 elif cam_name == "fullgrad":
@@ -577,10 +579,11 @@ def calc_gradcams(models_list):
 
 if __name__ == '__main__':
     # models_list = models.list_models(module=models) - TODO
-    all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-               "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
-                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-                   "vit_b_16", "swin_t", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
-    models_list = all_models_list[-1:]
-    train_grad_models(models_list)
+    calc_gradcams(["swin_t"])
+    # all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+    #            "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+    #                "vit_b_16", "swin_t", "swin_base_patch4_window7_224", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
+    # models_list = all_models_list[-1:]
+    # train_grad_models(models_list)
     # train_grad_all()

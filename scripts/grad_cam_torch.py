@@ -4,6 +4,8 @@ import warnings
 from collections import defaultdict, namedtuple
 from copy import deepcopy
 from pathlib import Path
+
+import timm
 import torch
 from pytorch_grad_cam.metrics.road import ROADCombined
 from torchinfo import summary
@@ -43,6 +45,7 @@ torch.manual_seed(SEED)
 np.random.seed(SEED)
 class_number = 5
 ModelHub = namedtuple('ModelHub', ['repo', 'name'])
+ModelHub.__str__ = lambda m: m.name
 
 CAM_METHODS = {
     "gradcam": GradCAM,
@@ -254,7 +257,10 @@ def load_model(model_name):
     elif isinstance(model_name, ModelHub):
         model = torch.hub.load(model_name.repo, model_name.name, pretrained=True)
     model = modify_model_output(model, train=False, num_classes=class_number)
-    model.name = model_name
+    if isinstance(model_name, ModelHub):
+        model.name = model_name.name
+    else:
+        model.name = model_name
     model_path = Path(f'../weights/{model.name}_best_val.pth')
     if model_path.exists():
         best_weights = torch.load(model_path)
@@ -266,10 +272,17 @@ def load_model(model_name):
 
 def train_model(model_name):
     if isinstance(model_name, str):
-        model = models.get_model(model_name, weights="DEFAULT")
+        if model_name in models.list_models(module=models):
+            model = models.get_model(model_name, weights="DEFAULT")
+        else:
+            model = timm.create_model(model_name, pretrained=True)
     elif isinstance(model_name, ModelHub):
         model = torch.hub.load(model_name.repo, model_name.name, pretrained=True)
     model = modify_model_output(model, train=True, num_classes=class_number)
+    if isinstance(model_name, ModelHub):
+        model.name = model_name.name
+    else:
+        model.name = model_name
     model.name = model_name
     model = train(model, max_epochs=500, train_flag=True, verbose=True)
     return model
@@ -579,11 +592,11 @@ def calc_gradcams(models_list):
 
 if __name__ == '__main__':
     # models_list = models.list_models(module=models) - TODO
-    calc_gradcams(["swin_t"])
-    # all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
-    #            "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
-    #                "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
-    #                "vit_b_16", "swin_t", "swin_base_patch4_window7_224", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
+    calc_gradcams([ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')])
+    all_models_list = ["resnet18", "resnet50", "resnext50_32x4d",
+               "vgg16", "alexnet", "mobilenet_v2", "mobilenet_v3_large",
+                   "densenet121", "shufflenet_v2_x1_0", "efficientnet_b0",
+                   "vit_b_16", "swin_t", ModelHub(repo='facebookresearch/deit:main', name='deit_tiny_patch16_224')]
     # models_list = all_models_list[-1:]
     # train_grad_models(models_list)
     # train_grad_all()
